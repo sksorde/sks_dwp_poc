@@ -21,7 +21,12 @@ st.set_page_config(page_title="DWP AI Service Requests", layout="wide")
 # -------------------
 for key in ["page", "last_request_id", "guidance_url", "rerun_flag", "faiss_index", "embedding_ids"]:
     if key not in st.session_state:
-        st.session_state[key] = None if key != "page" else "submit"
+        if key == "page":
+            st.session_state[key] = "submit"
+        elif key == "embedding_ids":
+            st.session_state[key] = []
+        else:
+            st.session_state[key] = None
 
 # -------------------
 # Safe rerun at top-level
@@ -167,12 +172,14 @@ if st.session_state.faiss_index is None:
     st.session_state.embedding_ids = ids
 
 def search_requests(query: str, top_k=5):
-    if len(st.session_state.embedding_ids) == 0:
+    if st.session_state.faiss_index is None or len(st.session_state.embedding_ids) == 0:
         return pd.DataFrame()
     vec = embedder.encode([query]).astype("float32")
     D, I = st.session_state.faiss_index.search(vec, top_k)
     results = []
     for idx in I[0]:
+        if idx >= len(st.session_state.embedding_ids):
+            continue
         rid = st.session_state.embedding_ids[idx]
         rec = get_request(rid)
         if rec:
@@ -187,12 +194,14 @@ def search_requests(query: str, top_k=5):
     return pd.DataFrame(results)
 
 def search_similar_requests(query:str, top_k=3):
-    if len(st.session_state.embedding_ids)==0:
+    if st.session_state.faiss_index is None or len(st.session_state.embedding_ids)==0:
         return []
     vec = embedder.encode([query]).astype("float32")
     D,I = st.session_state.faiss_index.search(vec, top_k)
     results = []
     for idx in I[0]:
+        if idx >= len(st.session_state.embedding_ids):
+            continue
         rid = st.session_state.embedding_ids[idx]
         rec = get_request(rid)
         if rec: results.append(rec)
