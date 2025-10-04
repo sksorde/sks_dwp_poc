@@ -111,15 +111,26 @@ GUIDANCE_URLS = {
 
 def route_request(text: str):
     text_l = text.lower()
-    for key, url in GUIDANCE_URLS.items():
-        if key in text_l:
-            team = next((t["name"] for t in DWP_TEAMS if key in " ".join(t.get("keywords", []))), "General Intake")
-            return team, False, 0.9, url
+    
+    # First, check team keywords
     for team in DWP_TEAMS:
         for kw in team.get("keywords", []):
-            if kw in text_l:
+            if kw.lower() in text_l:
                 vuln = team.get("vulnerability", False)
-                return team["name"], vuln, 0.9, None
+                # Assign guidance URL if available
+                guidance_url = None
+                for k, url in GUIDANCE_URLS.items():
+                    if k in kw.lower() or k in text_l:
+                        guidance_url = url
+                        break
+                return team["name"], vuln, 0.9, guidance_url
+    
+    # Next, check general guidance keywords
+    for key, url in GUIDANCE_URLS.items():
+        if key in text_l:
+            return "General Intake", False, 0.5, url
+    
+    # Default fallback
     return "General Intake", False, 0.5, None
 
 def compute_priority(prob:float,vulnerability:bool,sla:int)->int:
