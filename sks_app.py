@@ -17,6 +17,13 @@ from email.message import EmailMessage
 st.set_page_config(page_title="DWP AI Service Requests", layout="wide")
 
 # -------------------
+# Session state initialization
+# -------------------
+for key in ["page", "last_request_id", "guidance_url", "rerun_flag"]:
+    if key not in st.session_state:
+        st.session_state[key] = None if key != "page" else "submit"
+
+# -------------------
 # Database setup
 # -------------------
 DATABASE_URL = st.secrets.get("DATABASE_URL")
@@ -82,7 +89,6 @@ DWP_TEAMS = [
     {"name": "General Intake", "keywords":[], "sla_hours":168}
 ]
 
-# Specific gov.uk guidance URLs
 GUIDANCE_URLS = {
     "universal credit": "https://www.gov.uk/guidance/universal-credit-and-students",
     "child maintenance": "https://www.gov.uk/child-maintenance",
@@ -93,12 +99,10 @@ GUIDANCE_URLS = {
 
 def route_request(text: str):
     text_l = text.lower()
-    # Check for specific guidance URLs first
     for key, url in GUIDANCE_URLS.items():
         if key in text_l:
             team = next((t["name"] for t in DWP_TEAMS if key in " ".join(t.get("keywords", []))), "General Intake")
             return team, False, 0.9, url
-    # Default keyword-based routing
     for team in DWP_TEAMS:
         for kw in team.get("keywords", []):
             if kw in text_l:
@@ -146,28 +150,20 @@ def get_all_embeddings():
         return ids, vectors
 
 # -------------------
-# FAISS semantic search
+# FAISS setup
 # -------------------
-def search_similar_requests(query:str, top_k=3):
-    if len(st.session_state.embedding_ids)==0:
-        return []
-    vec = embedder.encode([query]).astype("float32")
-    D,I = st.session_state.faiss_index.search(vec, top_k)
-    results = []
-    for idx in I[0]:
-        rid = st.session_state.embedding_ids[idx]
-        rec = get_request(rid)
-        if rec: results.append(rec)
-    return results
+if "faiss_index" not in st.session_state:
+    ids, vecs = get_all_embeddings()
+    index = faiss.IndexFlatL2(EMBED_DIM)
+    if len(vecs)>0: index.add(vecs)
+    st.session_state.faiss_index = index
+    st.session_state.embedding_ids = ids
 
 def search_requests(query: str, top_k=5):
-    """Staff/Admin search for past requests"""
     if len(st.session_state.embedding_ids) == 0:
         return pd.DataFrame()
-    
     vec = embedder.encode([query]).astype("float32")
     D, I = st.session_state.faiss_index.search(vec, top_k)
-    
     results = []
     for idx in I[0]:
         rid = st.session_state.embedding_ids[idx]
@@ -182,6 +178,18 @@ def search_requests(query: str, top_k=5):
                 "eta_hours": rec["eta_hours"]
             })
     return pd.DataFrame(results)
+
+def search_similar_requests(query:str, top_k=3):
+    if len(st.session_state.embedding_ids)==0:
+        return []
+    vec = embedder.encode([query]).astype("float32")
+    D,I = st.session_state.faiss_index.search(vec, top_k)
+    results = []
+    for idx in I[0]:
+        rid = st.session_state.embedding_ids[idx]
+        rec = get_request(rid)
+        if rec: results.append(rec)
+    return results
 
 # -------------------
 # Email notifications
@@ -212,21 +220,10 @@ DEPT_EMAILS = {
 }
 
 # -------------------
-# Session state
-# -------------------
-if "page" not in st.session_state: st.session_state.page="submit"
-if "last_request_id" not in st.session_state: st.session_state.last_request_id=None
-if "faiss_index" not in st.session_state:
-    ids, vecs = get_all_embeddings()
-    index = faiss.IndexFlatL2(EMBED_DIM)
-    if len(vecs)>0: index.add(vecs)
-    st.session_state.faiss_index = index
-    st.session_state.embedding_ids = ids
-
-# -------------------
 # UI: Submit Request
 # -------------------
 st.title("DWP AI Service Request System")
+
 if st.session_state.page=="submit":
     st.header("Submit a Request")
     with st.form("submit_form"):
@@ -262,30 +259,35 @@ if st.session_state.page=="submit":
             st.session_state.faiss_index.add(vec)
             st.session_state.embedding_ids.append(rid)
 
-            # Semantic search for similar requests
             similar = search_similar_requests(full_text)
             if similar:
                 st.markdown("### Similar past requests:")
                 for s in similar:
                     st.markdown(f"- **{s['subject']}** ({s['assigned_team']}) – Status: {s['status']}")
 
-            # Email notification
             dept_email = DEPT_EMAILS.get(team)
             if dept_email:
                 body = f"New request assigned to {team}:\n\nID: {rid}\nSubject: {subject}\nText: {full_text}\nETA: {sla}h"
                 send_email(dept_email, f"New DWP Request: {rid}", body)
 
             st.session_state.last_request_id = rid
-            st.session_state.page="department"
+            st.session_state.page = "department"
             st.session_state.guidance_url = guidance_url
-            st.experimental_rerun()
+            st.session_state.rerun_flag = True
 
 # -------------------
-# Department Dashboard
+# Safe rerun
 # -------------------
-elif st.session_state.page=="department":
+if st.session_state.rerun_flag:
+    st.session_state.rerun_flag = False
+    st.experimental_rerun()
+
+# -------------------
+# Department / Citizen Dashboard
+# -------------------
+if st.session_state.page=="department" and st.session_state.last_request_id:
     rec = get_request(st.session_state.last_request_id)
-    guidance_url = st.session_state.get("guidance_url")
+    guidance_url = st.session_state.guidance_url
     if rec:
         st.success(f"Your request has been routed to **{rec['assigned_team']}**")
         st.markdown(f"**Request ID:** {rec['id']}")
@@ -298,9 +300,10 @@ elif st.session_state.page=="department":
             st.markdown(f"[Click here for guidance]({guidance_url})", unsafe_allow_html=True)
 
         df = get_all_requests_df()
-        df_team = df[df['assigned_team']==rec['assigned_team']]
-        st.markdown(f"### All requests in {rec['assigned_team']}")
-        st.dataframe(df_team[['id','subject','status','priority','eta_hours']])
+        if not df.empty:
+            df_team = df[df['assigned_team']==rec['assigned_team']]
+            st.markdown(f"### All requests in {rec['assigned_team']}")
+            st.dataframe(df_team[['id','subject','status','priority','eta_hours']])
 
         if st.button("Submit another request"):
             st.session_state.page="submit"
@@ -311,7 +314,7 @@ elif st.session_state.page=="department":
 # -------------------
 # Admin Dashboard & Staff Search
 # -------------------
-with st.expander("Admin Dashboard / Monitoring", expanded=False):
+with st.expander("Admin Dashboard / Monitoring", expanded=True):
     st.markdown("### Real-time Status & Priority Breakdown")
     df = get_all_requests_df()
     if not df.empty:
@@ -322,7 +325,7 @@ with st.expander("Admin Dashboard / Monitoring", expanded=False):
         st.markdown("#### Requests by Assigned Team")
         st.bar_chart(df['assigned_team'].value_counts())
 
-with st.expander("Staff / Department Search", expanded=False):
+with st.expander("Staff / Department Search", expanded=True):
     st.markdown("### Search Past Requests")
     query = st.text_input("Enter keywords or description")
     top_k = st.slider("Number of results", min_value=1, max_value=10, value=5)
