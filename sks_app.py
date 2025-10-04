@@ -19,9 +19,16 @@ st.set_page_config(page_title="DWP AI Service Requests", layout="wide")
 # -------------------
 # Session state initialization
 # -------------------
-for key in ["page", "last_request_id", "guidance_url", "rerun_flag"]:
+for key in ["page", "last_request_id", "guidance_url", "rerun_flag", "faiss_index", "embedding_ids"]:
     if key not in st.session_state:
         st.session_state[key] = None if key != "page" else "submit"
+
+# -------------------
+# Safe rerun at top-level
+# -------------------
+if st.session_state.get("rerun_flag", False):
+    st.session_state["rerun_flag"] = False
+    st.experimental_rerun()
 
 # -------------------
 # Database setup
@@ -152,7 +159,7 @@ def get_all_embeddings():
 # -------------------
 # FAISS setup
 # -------------------
-if "faiss_index" not in st.session_state:
+if st.session_state.faiss_index is None:
     ids, vecs = get_all_embeddings()
     index = faiss.IndexFlatL2(EMBED_DIM)
     if len(vecs)>0: index.add(vecs)
@@ -273,14 +280,7 @@ if st.session_state.page=="submit":
             st.session_state.last_request_id = rid
             st.session_state.page = "department"
             st.session_state.guidance_url = guidance_url
-            st.session_state.rerun_flag = True
-
-# -------------------
-# Safe rerun
-# -------------------
-if st.session_state.rerun_flag:
-    st.session_state.rerun_flag = False
-    st.experimental_rerun()
+            st.session_state.rerun_flag = True  # safe rerun
 
 # -------------------
 # Department / Citizen Dashboard
@@ -309,7 +309,7 @@ if st.session_state.page=="department" and st.session_state.last_request_id:
             st.session_state.page="submit"
             st.session_state.last_request_id=None
             st.session_state.guidance_url = None
-            st.experimental_rerun()
+            st.session_state.rerun_flag = True
 
 # -------------------
 # Admin Dashboard & Staff Search
