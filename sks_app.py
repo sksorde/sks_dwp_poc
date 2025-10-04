@@ -210,13 +210,13 @@ def save_embedding(rid: str, vec: np.ndarray):
 def get_request(rid: str) -> Optional[dict]:
     with engine.connect() as conn:
         q = select(requests_table).where(requests_table.c.id == rid)
-        row = conn.execute(q).fetchone()
+        row = conn.execute(q).mappings().fetchone()
         return dict(row) if row else None
 
 def get_all_requests_df() -> pd.DataFrame:
     with engine.connect() as conn:
         q = select(requests_table)
-        rows = conn.execute(q).fetchall()
+        rows = conn.execute(q).mappings().fetchall()
         if not rows:
             return pd.DataFrame()
         df = pd.DataFrame(rows)
@@ -225,7 +225,7 @@ def get_all_requests_df() -> pd.DataFrame:
 def load_all_embeddings_from_db():
     with engine.connect() as conn:
         q = select(embeddings_table)
-        rows = conn.execute(q).fetchall()
+        rows = conn.execute(q).mappings().fetchall()
         ids = []
         vecs = []
         for r in rows:
