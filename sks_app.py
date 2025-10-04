@@ -209,7 +209,7 @@ def save_embedding(rid: str, vec: np.ndarray):
 
 def get_request(rid: str) -> Optional[dict]:
     with engine.connect() as conn:
-        q = select([requests_table]).where(requests_table.c.id == rid)
+        q = select(requests_table).where(requests_table.c.id == rid)
         row = conn.execute(q).fetchone()
         return dict(row) if row else None
 
