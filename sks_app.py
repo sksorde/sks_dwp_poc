@@ -215,7 +215,7 @@ def get_request(rid: str) -> Optional[dict]:
 
 def get_all_requests_df() -> pd.DataFrame:
     with engine.connect() as conn:
-        q = select([requests_table])
+        q = select(requests_table)
         rows = conn.execute(q).fetchall()
         if not rows:
             return pd.DataFrame()
@@ -224,7 +224,7 @@ def get_all_requests_df() -> pd.DataFrame:
 
 def load_all_embeddings_from_db():
     with engine.connect() as conn:
-        q = select([embeddings_table])
+        q = select(embeddings_table)
         rows = conn.execute(q).fetchall()
         ids = []
         vecs = []
