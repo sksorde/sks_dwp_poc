@@ -6,3 +6,5 @@ joblib
 pandas
 numpy
 pyyaml
+psycopg2-binary
+faiss-cpu   # optional. If this fails at build time, Streamlit Cloud will not install it and the app will fall back to numpy search.
